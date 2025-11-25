@@ -29,7 +29,7 @@ This repository provides an end-to-end solution for:
 - [Environment Setup](#step-2-environment-setup)
 - [Model Download](#step-3-download-and-verify-model)
 
-**PART 2: LOCAL TESTING (Optional)**
+**PART 2: LOCAL / RUNPOD TESTING (Optional)**
 - [Local Benchmarking](#step-4-optional-local-benchmarking)
 - [Test Handler Locally](#step-5-optional-test-handler-locally)
 
@@ -198,9 +198,9 @@ This creates `models/model_info.json` with model metadata.
 
 ---
 
-# PART 2: LOCAL TESTING (Optional)
+# PART 2: LOCAL / runpod TESTING (Optional)
 
-Note: Local testing requires an NVIDIA GPU. Skip to Part 3 if you don't have a GPU.
+Note: Local testing requires an NVIDIA GPU. If you are comfortable using RunPod clone the repo on a A100 GPU instance and run the scripts there for benchmakring. Skip to Part 3 if you don't have a GPU.
 
 ## Step 4 (Optional): Local Benchmarking
 
