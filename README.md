@@ -206,7 +206,7 @@ Note: Local testing requires an NVIDIA GPU. If you are comfortable using RunPod 
 2. Clone the repository
 3. pip install -r requirements.txt
 4. python scripts/download_model.py (downloads on RunPod)
-5. python scripts/benchmark_local.py (runs on RunPod's A100)
+5. python scripts/benchmark_local.py (runs on RunPod's A100) ( more details below )
    
 ```bash
 pip install --upgrade pip
