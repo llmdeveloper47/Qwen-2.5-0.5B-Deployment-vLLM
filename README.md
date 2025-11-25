@@ -202,6 +202,17 @@ This creates `models/model_info.json` with model metadata.
 
 Note: Local testing requires an NVIDIA GPU. If you are comfortable using RunPod clone the repo on a A100 GPU instance and run the scripts there for benchmakring. Skip to Part 3 if you don't have a GPU.
 
+1. Create a RunPod Pod (not serverless)
+2. Clone the repository
+3. pip install -r requirements.txt
+4. python scripts/download_model.py (downloads on RunPod)
+5. python scripts/benchmark_local.py (runs on RunPod's A100)
+   
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
 ## Step 4 (Optional): Local Benchmarking
 
 Test different quantization methods locally before deploying:
