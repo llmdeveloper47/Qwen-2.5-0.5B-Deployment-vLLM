@@ -79,7 +79,7 @@ This repository provides an end-to-end solution for:
 - Git
 - Docker 20.10+
 
-**For Local GPU Testing (Optional):**
+**For Local GPU / RunPod Testing (Optional):**
 - NVIDIA GPU with 16GB+ VRAM
 - CUDA Toolkit 12.1+
 - NVIDIA drivers
