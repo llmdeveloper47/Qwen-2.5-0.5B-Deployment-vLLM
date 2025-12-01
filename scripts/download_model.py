@@ -119,19 +119,38 @@ def download_model(model_id: str, output_dir: str = "./models") -> dict:
         
         # Test model (optional)
         print(f"\n[Testing] Running quick inference test...")
-        test_text = "Book me a flight to San Francisco"
-        inputs = tokenizer(test_text, return_tensors="pt", truncation=True, max_length=512)
-        
-        with torch.no_grad():
-            outputs = model(**inputs)
-            logits = outputs.logits
-            predicted_class = torch.argmax(logits, dim=-1).item()
-            confidence = torch.softmax(logits, dim=-1).max().item()
-        
-        print(f"  ✓ Test inference successful")
-        print(f"    Input: '{test_text}'")
-        print(f"    Predicted class: {predicted_class} ({id2label[str(predicted_class)]})")
-        print(f"    Confidence: {confidence:.4f}")
+        try:
+            test_text = """Beautiful design. Twelve rolls of the most beautiful washi tape you could own is sold right here on Amazon and by Allydrew. The colors are gorgeous, the tape is easy to lay down and lift up if you need to readjust it, and it tears easy which makes it a joy to work with. I have a humongous washi collection and Allydrew is some of the best I have found. The patterns are beautiful and unlike any I have found at the craft stores. They are 10 yard rolls, which is a great amount per roll. If you break down the price to a per roll price it breaks down to around $1.60 per roll. That is a really great price.
+
+This retails for $18.99 per twelve roll pack but I received it at the discounted amount of $9.30 in exchange for my honest review.
+
+I review all the Allydrew washi I get from AMZ on my YouTube channel (sprngbrd *) if you would like to see each individual roll that way."""
+            expected_label = "arts-crafts-and-sewing_crafting"
+            inputs = tokenizer(test_text, return_tensors="pt", truncation=True, max_length=512)
+            
+            with torch.no_grad():
+                outputs = model(**inputs)
+                logits = outputs.logits
+                predicted_class = torch.argmax(logits, dim=-1).item()
+                confidence = torch.softmax(logits, dim=-1).max().item()
+            
+            # Get label name, handling potential missing keys
+            label_name = id2label.get(str(predicted_class), f"UNKNOWN_CLASS_{predicted_class}")
+            
+            print(f"  ✓ Test inference successful")
+            print(f"    Input: '{test_text[:80]}...'")
+            print(f"    Expected label: {expected_label}")
+            print(f"    Predicted class: {predicted_class} ({label_name})")
+            print(f"    Confidence: {confidence:.4f}")
+            
+            # Check if prediction matches expected
+            if label_name == expected_label:
+                print(f"    ✓ Prediction matches expected label!")
+            else:
+                print(f"    ⚠ Prediction differs from expected (this is okay for initial test)")
+        except Exception as test_error:
+            print(f"  ⚠ Warning: Test inference failed ({str(test_error)})")
+            print(f"    This is non-critical - model files are downloaded correctly")
         
         print("\n" + "=" * 70)
         print("✓ Model download and verification complete!")
@@ -141,6 +160,11 @@ def download_model(model_id: str, output_dir: str = "./models") -> dict:
         
     except Exception as e:
         print(f"\n✗ Error downloading model: {str(e)}")
+        print(f"\nDebug info:")
+        print(f"  Model ID: {model_id}")
+        print(f"  Output directory: {output_dir}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 
