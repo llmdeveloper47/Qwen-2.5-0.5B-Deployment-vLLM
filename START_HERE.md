@@ -59,6 +59,15 @@ python scripts/download_model_safe.py
 
 **Step 5:** Run local benchmarks (Optional)
 ```bash
+# Uninstall current PyTorch ( torch 2.9 is unstable on Runpod )
+pip uninstall torch torchvision torchaudio -y
+
+# Install stable PyTorch 2.4.0
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+
+# Verify installation
+python -c "import torch; print(f'PyTorch: {torch.__version__}')"
+
 # to sample sequences by length, use below command
 python scripts/benchmark_local.py --quantization none --batch-sizes 1,8,16,64 --num-samples 1000
 

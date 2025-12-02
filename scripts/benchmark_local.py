@@ -18,12 +18,7 @@ import torch
 from datasets import load_dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-# Optional imports for different inference engines
-try:
-    from optimum.onnxruntime import ORTModelForSequenceClassification
-    ONNX_AVAILABLE = True
-except ImportError:
-    ONNX_AVAILABLE = False
+# FlashAttention is built into PyTorch 2.0+ via SDPA (Scaled Dot Product Attention)
 
 
 def load_test_data(dataset_name: str = "codefactory4791/amazon_test", 
@@ -133,29 +128,35 @@ def load_test_data(dataset_name: str = "codefactory4791/amazon_test",
 
 
 def initialize_model(model_id: str, quantization: str = "none", 
-                    inference_engine: str = "transformers",
-                    use_optimizations: bool = True) -> tuple:
+                    use_flash_attention: bool = False) -> tuple:
     """
     Initialize model and tokenizer with specified configuration.
     
     Args:
         model_id: HuggingFace model ID
-        quantization: Quantization method (none, bitsandbytes, awq, gptq)
-        inference_engine: Inference engine (transformers, onnx)
-        use_optimizations: Apply optimizations (BetterTransformer, torch.compile)
+        quantization: Quantization method (none, bitsandbytes)
+        use_flash_attention: Enable FlashAttention via PyTorch SDPA
     
     Returns:
-        tuple: (model, tokenizer, device, engine_type)
+        tuple: (model, tokenizer, device)
     """
     print(f"\nInitializing model...")
     print(f"  Model: {model_id}")
     print(f"  Quantization: {quantization}")
-    print(f"  Inference Engine: {inference_engine}")
-    print(f"  Optimizations: {use_optimizations}")
+    print(f"  FlashAttention: {use_flash_attention}")
     
     start = time.perf_counter()
     
     try:
+        # Enable FlashAttention if requested (must be done before model loading)
+        if use_flash_attention:
+            # Enable FlashAttention backend for scaled_dot_product_attention
+            # This uses optimized CUDA kernels for attention computation
+            torch.backends.cuda.enable_flash_sdp(True)
+            torch.backends.cuda.enable_mem_efficient_sdp(False)
+            torch.backends.cuda.enable_math_sdp(False)
+            print(f"  Enabled FlashAttention via SDPA backend")
+        
         # Load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         if tokenizer.pad_token is None:
@@ -163,41 +164,8 @@ def initialize_model(model_id: str, quantization: str = "none",
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # ONNX Runtime Engine
-        if inference_engine == "onnx":
-            if not ONNX_AVAILABLE:
-                print("  Error: ONNX Runtime not available. Install with: pip install optimum[onnxruntime-gpu]")
-                sys.exit(1)
-            
-            print(f"  Loading model with ONNX Runtime...")
-            
-            # Check if ONNX model already exists locally
-            onnx_path = Path(f"./models_onnx/{quantization}")
-            
-            if onnx_path.exists():
-                print(f"  Loading from cached ONNX model: {onnx_path}")
-                model = ORTModelForSequenceClassification.from_pretrained(
-                    str(onnx_path),
-                    provider="CUDAExecutionProvider"
-                )
-            else:
-                print(f"  Converting model to ONNX format...")
-                model = ORTModelForSequenceClassification.from_pretrained(
-                    model_id,
-                    export=True,
-                    provider="CUDAExecutionProvider"
-                )
-                # Save for future use
-                onnx_path.mkdir(parents=True, exist_ok=True)
-                model.save_pretrained(str(onnx_path))
-                tokenizer.save_pretrained(str(onnx_path))
-                print(f"  ONNX model cached to: {onnx_path}")
-            
-            engine_type = "onnx"
-        
-        # Standard Transformers Engine
-        else:
-            if quantization == "bitsandbytes":
+        # Load model with quantization
+        if quantization == "bitsandbytes":
                 from transformers import BitsAndBytesConfig
                 quantization_config = BitsAndBytesConfig(load_in_8bit=True)
                 model = AutoModelForSequenceClassification.from_pretrained(
@@ -205,50 +173,20 @@ def initialize_model(model_id: str, quantization: str = "none",
                     quantization_config=quantization_config,
                     device_map="auto"
                 )
-            elif quantization == "awq":
-                model = AutoModelForSequenceClassification.from_pretrained(
-                    model_id,
-                    device_map="auto"
-                )
-            elif quantization == "gptq":
-                model = AutoModelForSequenceClassification.from_pretrained(
-                    model_id,
-                    device_map="auto"
-                )
-            else:
-                # No quantization - simple loading
-                model = AutoModelForSequenceClassification.from_pretrained(model_id)
-                model = model.to(device)
-            
-            # Ensure model knows the pad token
-            model.config.pad_token_id = tokenizer.pad_token_id
-            model.eval()
-            
-            # Apply optimizations for transformers engine
-            if use_optimizations and quantization == "none" and inference_engine == "transformers":
-                # Apply BetterTransformer
-                try:
-                    model = model.to_bettertransformer()
-                    print(f"  Applied BetterTransformer optimization")
-                except Exception as e:
-                    print(f"  Warning: Could not apply BetterTransformer: {e}")
-                
-                # Apply torch.compile if available
-                if hasattr(torch, "compile"):
-                    try:
-                        model = torch.compile(model, mode="reduce-overhead")
-                        print(f"  Applied torch.compile optimization")
-                    except Exception as e:
-                        print(f"  Warning: Could not apply torch.compile: {e}")
-            
-            engine_type = "transformers"
+        else:
+            # No quantization - simple FP16 loading
+            model = AutoModelForSequenceClassification.from_pretrained(model_id)
+            model = model.to(device)
+        
+        # Ensure model knows the pad token
+        model.config.pad_token_id = tokenizer.pad_token_id
+        model.eval()
         
         load_time = time.perf_counter() - start
         print(f"  Model loaded in {load_time:.2f}s")
         print(f"  Device: {device}")
-        print(f"  Engine: {engine_type}")
         
-        return model, tokenizer, device, engine_type
+        return model, tokenizer, device
         
     except Exception as e:
         print(f"  Failed to load model: {str(e)}")
@@ -257,8 +195,7 @@ def initialize_model(model_id: str, quantization: str = "none",
         sys.exit(1)
 
 
-def benchmark_batch_size(model, tokenizer, device, prompts: List[str], batch_size: int, 
-                         engine_type: str = "transformers") -> Dict[str, float]:
+def benchmark_batch_size(model, tokenizer, device, prompts: List[str], batch_size: int) -> Dict[str, float]:
     """Run benchmark for a specific batch size."""
     # Split prompts into batches
     batches = [prompts[i:i+batch_size] for i in range(0, len(prompts), batch_size)]
@@ -314,8 +251,7 @@ def run_benchmarks(model_id: str,
                    batch_sizes: List[int],
                    num_samples: int = 1000,
                    balance_lengths: bool = True,
-                   inference_engine: str = "transformers",
-                   use_optimizations: bool = True,
+                   use_flash_attention: bool = False,
                    output_dir: str = "./results/local_benchmarks") -> List[Dict]:
     """Run comprehensive benchmarks."""
     print("\n" + "=" * 70)
@@ -323,11 +259,10 @@ def run_benchmarks(model_id: str,
     print("=" * 70)
     print(f"Model: {model_id}")
     print(f"Quantization: {quantization}")
-    print(f"Inference Engine: {inference_engine}")
+    print(f"FlashAttention: {use_flash_attention}")
     print(f"Batch sizes: {batch_sizes}")
     print(f"Number of samples: {num_samples}")
     print(f"Balance sequence lengths: {balance_lengths}")
-    print(f"Use optimizations: {use_optimizations}")
     print("=" * 70)
     
     # Load test data
@@ -337,8 +272,8 @@ def run_benchmarks(model_id: str,
     )
     
     # Initialize model
-    model, tokenizer, device, engine_type = initialize_model(
-        model_id, quantization, inference_engine, use_optimizations
+    model, tokenizer, device = initialize_model(
+        model_id, quantization, use_flash_attention
     )
     
     # Run benchmarks for each batch size
@@ -351,9 +286,9 @@ def run_benchmarks(model_id: str,
     for batch_size in batch_sizes:
         print(f"\n[Batch Size: {batch_size}]")
         
-        metrics = benchmark_batch_size(model, tokenizer, device, prompts, batch_size, engine_type)
+        metrics = benchmark_batch_size(model, tokenizer, device, prompts, batch_size)
         metrics['quantization'] = quantization
-        metrics['inference_engine'] = inference_engine
+        metrics['flash_attention'] = use_flash_attention
         metrics['model_id'] = model_id
         
         results.append(metrics)
@@ -365,8 +300,8 @@ def run_benchmarks(model_id: str,
         print(f"  P95 Latency:   {metrics['p95_latency_ms']:>7.2f} ms")
         print(f"  P99 Latency:   {metrics['p99_latency_ms']:>7.2f} ms")
     
-    # Save results with engine suffix
-    config_name = f"{quantization}_{inference_engine}" if inference_engine != "transformers" else quantization
+    # Save results with flash suffix if enabled
+    config_name = f"{quantization}_flash" if use_flash_attention else quantization
     output_path = Path(output_dir) / config_name
     output_path.mkdir(parents=True, exist_ok=True)
     
@@ -408,15 +343,14 @@ def main():
         "--quantization",
         type=str,
         default="none",
-        choices=["none", "bitsandbytes", "awq", "gptq"],
-        help="Quantization method"
+        choices=["none", "bitsandbytes"],
+        help="Quantization method (none=FP16, bitsandbytes=INT8)"
     )
     parser.add_argument(
-        "--inference-engine",
-        type=str,
-        default="transformers",
-        choices=["transformers", "onnx"],
-        help="Inference engine to use (transformers=standard PyTorch, onnx=ONNX Runtime)"
+        "--use-flash-attention",
+        action="store_true",
+        default=False,
+        help="Enable FlashAttention optimization via PyTorch SDPA"
     )
     parser.add_argument(
         "--batch-sizes",
@@ -443,18 +377,6 @@ def main():
         help="Disable length balancing (use random sampling)"
     )
     parser.add_argument(
-        "--use-optimizations",
-        action="store_true",
-        default=True,
-        help="Enable optimizations (BetterTransformer, torch.compile)"
-    )
-    parser.add_argument(
-        "--no-optimizations",
-        action="store_false",
-        dest="use_optimizations",
-        help="Disable optimizations"
-    )
-    parser.add_argument(
         "--output-dir",
         type=str,
         default="./results/local_benchmarks",
@@ -473,14 +395,13 @@ def main():
         batch_sizes=batch_sizes,
         num_samples=args.num_samples,
         balance_lengths=args.balance_lengths,
-        inference_engine=args.inference_engine,
-        use_optimizations=args.use_optimizations,
+        use_flash_attention=args.use_flash_attention,
         output_dir=args.output_dir
     )
     
     print("\nBenchmarking complete!")
     print(f"\nNext steps:")
-    config_name = f"{args.quantization}_{args.inference_engine}" if args.inference_engine != "transformers" else args.quantization
+    config_name = f"{args.quantization}_flash" if args.use_flash_attention else args.quantization
     print(f"  1. Review results in: {args.output_dir}/{config_name}/")
     print(f"  2. Test other configurations")
     print(f"  3. Compare results: python scripts/compare_results.py")

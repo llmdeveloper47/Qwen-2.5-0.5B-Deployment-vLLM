@@ -1,20 +1,32 @@
-# Core ML dependencies - Compatible versions tested together
+# INSTALLATION NOTES:
+# For best compatibility, install in this order:
+# 1. pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+# 2. pip install transformers==4.45.2 tokenizers==0.20.3
+# 3. pip install -r requirements.txt (for remaining packages)
+#
+# Or use: pip install -r requirements.txt --ignore-installed blinker
+#
+# Note: ONNX Runtime removed (Qwen2 not supported for classification tasks)
+
+# Core ML dependencies - CRITICAL: Must use these exact versions
+# PyTorch 2.4.0 is stable (2.9.x has memory bugs, 2.5.x incompatible with optimum)
 torch==2.4.0
 torchvision==0.19.0
 torchaudio==2.4.0
+
+# Transformers - Compatible with optimum 1.16.2
 transformers==4.45.2
 tokenizers==0.20.3
+
+# Datasets - Version 3.x required for pyarrow compatibility
 datasets>=3.0.0
+
+# Model optimization
 peft==0.7.1
 accelerate==0.25.0
 
 # Quantization support
 bitsandbytes==0.41.3
-
-# ONNX Runtime for GPU inference optimization
-optimum==1.16.2
-onnxruntime-gpu==1.18.1
-onnx==1.16.0
 
 # Hugging Face Hub integration
 huggingface-hub==0.23.5
