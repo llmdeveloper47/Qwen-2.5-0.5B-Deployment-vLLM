@@ -1,0 +1,54 @@
+[
+  {
+    "batch_size": 1,
+    "total_samples": 1000,
+    "total_time": 20.932,
+    "throughput": 47.77,
+    "avg_latency_ms": 20.93,
+    "p50_latency_ms": 20.32,
+    "p95_latency_ms": 23.24,
+    "p99_latency_ms": 25.88,
+    "quantization": "none",
+    "flash_attention": true,
+    "model_id": "codefactory4791/intent-classification-qwen"
+  },
+  {
+    "batch_size": 8,
+    "total_samples": 1000,
+    "total_time": 4.1,
+    "throughput": 243.88,
+    "avg_latency_ms": 32.8,
+    "p50_latency_ms": 32.26,
+    "p95_latency_ms": 36.16,
+    "p99_latency_ms": 40.98,
+    "quantization": "none",
+    "flash_attention": true,
+    "model_id": "codefactory4791/intent-classification-qwen"
+  },
+  {
+    "batch_size": 16,
+    "total_samples": 1000,
+    "total_time": 3.915,
+    "throughput": 255.4,
+    "avg_latency_ms": 62.15,
+    "p50_latency_ms": 62.52,
+    "p95_latency_ms": 64.78,
+    "p99_latency_ms": 65.48,
+    "quantization": "none",
+    "flash_attention": true,
+    "model_id": "codefactory4791/intent-classification-qwen"
+  },
+  {
+    "batch_size": 32,
+    "total_samples": 1000,
+    "total_time": 3.652,
+    "throughput": 273.81,
+    "avg_latency_ms": 114.13,
+    "p50_latency_ms": 116.53,
+    "p95_latency_ms": 118.48,
+    "p99_latency_ms": 118.91,
+    "quantization": "none",
+    "flash_attention": true,
+    "model_id": "codefactory4791/intent-classification-qwen"
+  }
+]
