@@ -18,6 +18,13 @@ import torch
 from datasets import load_dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+# Optional imports for different inference engines
+try:
+    from optimum.onnxruntime import ORTModelForSequenceClassification
+    ONNX_AVAILABLE = True
+except ImportError:
+    ONNX_AVAILABLE = False
+
 
 def load_test_data(dataset_name: str = "codefactory4791/amazon_test", 
                    split: str = "test", 
@@ -126,74 +133,122 @@ def load_test_data(dataset_name: str = "codefactory4791/amazon_test",
 
 
 def initialize_model(model_id: str, quantization: str = "none", 
+                    inference_engine: str = "transformers",
                     use_optimizations: bool = True) -> tuple:
-    """Initialize model and tokenizer - matching reference notebook approach."""
+    """
+    Initialize model and tokenizer with specified configuration.
+    
+    Args:
+        model_id: HuggingFace model ID
+        quantization: Quantization method (none, bitsandbytes, awq, gptq)
+        inference_engine: Inference engine (transformers, onnx)
+        use_optimizations: Apply optimizations (BetterTransformer, torch.compile)
+    
+    Returns:
+        tuple: (model, tokenizer, device, engine_type)
+    """
     print(f"\nInitializing model...")
     print(f"  Model: {model_id}")
     print(f"  Quantization: {quantization}")
+    print(f"  Inference Engine: {inference_engine}")
     print(f"  Optimizations: {use_optimizations}")
     
     start = time.perf_counter()
     
     try:
-        # Load tokenizer (matching reference notebook)
+        # Load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
         
-        # Determine device
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Load model with quantization
-        if quantization == "bitsandbytes":
-            from transformers import BitsAndBytesConfig
-            quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-            model = AutoModelForSequenceClassification.from_pretrained(
-                model_id,
-                quantization_config=quantization_config,
-                device_map="auto"
-            )
-        elif quantization == "awq":
-            model = AutoModelForSequenceClassification.from_pretrained(
-                model_id,
-                device_map="auto"
-            )
-        elif quantization == "gptq":
-            model = AutoModelForSequenceClassification.from_pretrained(
-                model_id,
-                device_map="auto"
-            )
-        else:
-            # No quantization - simple loading like reference notebook
-            model = AutoModelForSequenceClassification.from_pretrained(model_id)
-            model = model.to(device)
-        
-        # Ensure model knows the pad token
-        model.config.pad_token_id = tokenizer.pad_token_id
-        model.eval()
-        
-        # Apply optimizations if enabled and quantization is "none"
-        if use_optimizations and quantization == "none":
-            # Apply BetterTransformer
-            try:
-                model = model.to_bettertransformer()
-                print(f"  Applied BetterTransformer optimization")
-            except Exception as e:
-                print(f"  Warning: Could not apply BetterTransformer: {e}")
+        # ONNX Runtime Engine
+        if inference_engine == "onnx":
+            if not ONNX_AVAILABLE:
+                print("  Error: ONNX Runtime not available. Install with: pip install optimum[onnxruntime-gpu]")
+                sys.exit(1)
             
-            # Apply torch.compile if available (PyTorch 2.0+)
-            if hasattr(torch, "compile"):
+            print(f"  Loading model with ONNX Runtime...")
+            
+            # Check if ONNX model already exists locally
+            onnx_path = Path(f"./models_onnx/{quantization}")
+            
+            if onnx_path.exists():
+                print(f"  Loading from cached ONNX model: {onnx_path}")
+                model = ORTModelForSequenceClassification.from_pretrained(
+                    str(onnx_path),
+                    provider="CUDAExecutionProvider"
+                )
+            else:
+                print(f"  Converting model to ONNX format...")
+                model = ORTModelForSequenceClassification.from_pretrained(
+                    model_id,
+                    export=True,
+                    provider="CUDAExecutionProvider"
+                )
+                # Save for future use
+                onnx_path.mkdir(parents=True, exist_ok=True)
+                model.save_pretrained(str(onnx_path))
+                tokenizer.save_pretrained(str(onnx_path))
+                print(f"  ONNX model cached to: {onnx_path}")
+            
+            engine_type = "onnx"
+        
+        # Standard Transformers Engine
+        else:
+            if quantization == "bitsandbytes":
+                from transformers import BitsAndBytesConfig
+                quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    model_id,
+                    quantization_config=quantization_config,
+                    device_map="auto"
+                )
+            elif quantization == "awq":
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    model_id,
+                    device_map="auto"
+                )
+            elif quantization == "gptq":
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    model_id,
+                    device_map="auto"
+                )
+            else:
+                # No quantization - simple loading
+                model = AutoModelForSequenceClassification.from_pretrained(model_id)
+                model = model.to(device)
+            
+            # Ensure model knows the pad token
+            model.config.pad_token_id = tokenizer.pad_token_id
+            model.eval()
+            
+            # Apply optimizations for transformers engine
+            if use_optimizations and quantization == "none" and inference_engine == "transformers":
+                # Apply BetterTransformer
                 try:
-                    model = torch.compile(model, mode="reduce-overhead")
-                    print(f"  Applied torch.compile optimization")
+                    model = model.to_bettertransformer()
+                    print(f"  Applied BetterTransformer optimization")
                 except Exception as e:
-                    print(f"  Warning: Could not apply torch.compile: {e}")
+                    print(f"  Warning: Could not apply BetterTransformer: {e}")
+                
+                # Apply torch.compile if available
+                if hasattr(torch, "compile"):
+                    try:
+                        model = torch.compile(model, mode="reduce-overhead")
+                        print(f"  Applied torch.compile optimization")
+                    except Exception as e:
+                        print(f"  Warning: Could not apply torch.compile: {e}")
+            
+            engine_type = "transformers"
         
         load_time = time.perf_counter() - start
         print(f"  Model loaded in {load_time:.2f}s")
         print(f"  Device: {device}")
+        print(f"  Engine: {engine_type}")
         
-        return model, tokenizer, device
+        return model, tokenizer, device, engine_type
         
     except Exception as e:
         print(f"  Failed to load model: {str(e)}")
@@ -202,7 +257,8 @@ def initialize_model(model_id: str, quantization: str = "none",
         sys.exit(1)
 
 
-def benchmark_batch_size(model, tokenizer, device, prompts: List[str], batch_size: int) -> Dict[str, float]:
+def benchmark_batch_size(model, tokenizer, device, prompts: List[str], batch_size: int, 
+                         engine_type: str = "transformers") -> Dict[str, float]:
     """Run benchmark for a specific batch size."""
     # Split prompts into batches
     batches = [prompts[i:i+batch_size] for i in range(0, len(prompts), batch_size)]
@@ -258,6 +314,7 @@ def run_benchmarks(model_id: str,
                    batch_sizes: List[int],
                    num_samples: int = 1000,
                    balance_lengths: bool = True,
+                   inference_engine: str = "transformers",
                    use_optimizations: bool = True,
                    output_dir: str = "./results/local_benchmarks") -> List[Dict]:
     """Run comprehensive benchmarks."""
@@ -266,6 +323,7 @@ def run_benchmarks(model_id: str,
     print("=" * 70)
     print(f"Model: {model_id}")
     print(f"Quantization: {quantization}")
+    print(f"Inference Engine: {inference_engine}")
     print(f"Batch sizes: {batch_sizes}")
     print(f"Number of samples: {num_samples}")
     print(f"Balance sequence lengths: {balance_lengths}")
@@ -279,7 +337,9 @@ def run_benchmarks(model_id: str,
     )
     
     # Initialize model
-    model, tokenizer, device = initialize_model(model_id, quantization, use_optimizations)
+    model, tokenizer, device, engine_type = initialize_model(
+        model_id, quantization, inference_engine, use_optimizations
+    )
     
     # Run benchmarks for each batch size
     results = []
@@ -291,8 +351,9 @@ def run_benchmarks(model_id: str,
     for batch_size in batch_sizes:
         print(f"\n[Batch Size: {batch_size}]")
         
-        metrics = benchmark_batch_size(model, tokenizer, device, prompts, batch_size)
+        metrics = benchmark_batch_size(model, tokenizer, device, prompts, batch_size, engine_type)
         metrics['quantization'] = quantization
+        metrics['inference_engine'] = inference_engine
         metrics['model_id'] = model_id
         
         results.append(metrics)
@@ -304,8 +365,9 @@ def run_benchmarks(model_id: str,
         print(f"  P95 Latency:   {metrics['p95_latency_ms']:>7.2f} ms")
         print(f"  P99 Latency:   {metrics['p99_latency_ms']:>7.2f} ms")
     
-    # Save results
-    output_path = Path(output_dir) / quantization
+    # Save results with engine suffix
+    config_name = f"{quantization}_{inference_engine}" if inference_engine != "transformers" else quantization
+    output_path = Path(output_dir) / config_name
     output_path.mkdir(parents=True, exist_ok=True)
     
     results_file = output_path / "benchmark_results.json"
@@ -348,6 +410,13 @@ def main():
         default="none",
         choices=["none", "bitsandbytes", "awq", "gptq"],
         help="Quantization method"
+    )
+    parser.add_argument(
+        "--inference-engine",
+        type=str,
+        default="transformers",
+        choices=["transformers", "onnx"],
+        help="Inference engine to use (transformers=standard PyTorch, onnx=ONNX Runtime)"
     )
     parser.add_argument(
         "--batch-sizes",
@@ -404,15 +473,17 @@ def main():
         batch_sizes=batch_sizes,
         num_samples=args.num_samples,
         balance_lengths=args.balance_lengths,
+        inference_engine=args.inference_engine,
         use_optimizations=args.use_optimizations,
         output_dir=args.output_dir
     )
     
     print("\nBenchmarking complete!")
     print(f"\nNext steps:")
-    print(f"  1. Review results in: {args.output_dir}/{args.quantization}/")
-    print(f"  2. Test other quantization methods")
-    print(f"  3. Compare results: python scripts/analyze_results.py")
+    config_name = f"{args.quantization}_{args.inference_engine}" if args.inference_engine != "transformers" else args.quantization
+    print(f"  1. Review results in: {args.output_dir}/{config_name}/")
+    print(f"  2. Test other configurations")
+    print(f"  3. Compare results: python scripts/compare_results.py")
 
 
 if __name__ == "__main__":

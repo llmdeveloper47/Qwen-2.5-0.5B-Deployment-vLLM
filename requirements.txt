@@ -7,6 +7,10 @@ accelerate>=0.25.0
 optimum>=1.16.0
 bitsandbytes>=0.41.0
 
+# ONNX Runtime for GPU inference optimization
+onnxruntime-gpu>=1.16.0
+onnx>=1.15.0
+
 # Hugging Face Hub integration
 huggingface-hub>=0.20.0
 

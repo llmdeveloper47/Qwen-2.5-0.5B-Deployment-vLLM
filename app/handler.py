@@ -42,8 +42,8 @@ logger.info("Initializing model with optimizations...")
 start_time = time.time()
 
 try:
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=TRUST_REMOTE_CODE)
+    # Load tokenizer (matching reference notebook)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
@@ -57,29 +57,25 @@ try:
         model = AutoModelForSequenceClassification.from_pretrained(
             MODEL_NAME,
             quantization_config=quantization_config,
-            device_map="auto",
-            trust_remote_code=TRUST_REMOTE_CODE
+            device_map="auto"
         )
     elif QUANTIZATION == "awq":
         model = AutoModelForSequenceClassification.from_pretrained(
             MODEL_NAME,
-            device_map="auto",
-            trust_remote_code=TRUST_REMOTE_CODE
+            device_map="auto"
         )
     elif QUANTIZATION == "gptq":
         model = AutoModelForSequenceClassification.from_pretrained(
             MODEL_NAME,
-            device_map="auto",
-            trust_remote_code=TRUST_REMOTE_CODE
+            device_map="auto"
         )
     else:
-        # No quantization - use FP16
-        model = AutoModelForSequenceClassification.from_pretrained(
-            MODEL_NAME,
-            torch_dtype=torch.float16,
-            trust_remote_code=TRUST_REMOTE_CODE
-        )
+        # No quantization - simple loading like reference notebook
+        model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
         model = model.to(device)
+    
+    # Ensure model knows the pad token
+    model.config.pad_token_id = tokenizer.pad_token_id
     
     # Set to evaluation mode
     model.eval()

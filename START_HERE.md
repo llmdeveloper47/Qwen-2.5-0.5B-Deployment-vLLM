@@ -84,6 +84,42 @@ python scripts/benchmark_local.py \
 python scripts/test_local_handler.py
 ```
 
+**Step 7:** ONNX Runtime Optimization Benchmarks (Optional, Advanced)
+
+ONNX Runtime provides significant speedup through graph optimizations and operator fusion. Expected performance gains: 1.5-3x faster than standard PyTorch.
+
+```bash
+# Install ONNX Runtime dependencies
+pip install optimum[onnxruntime-gpu] onnx onnxruntime-gpu
+
+# Run ONNX Runtime benchmark
+python scripts/benchmark_local.py \
+  --quantization none \
+  --inference-engine onnx \
+  --batch-sizes 1,8,16,32 \
+  --num-samples 1000 \
+  --no-optimizations
+
+# Expected outcomes:
+# - First run: Converts model to ONNX (adds 30-60s)
+# - ONNX model cached to ./models_onnx/none/
+# - Results saved to results/local_benchmarks/none_onnx/
+# - 2-3x speedup at batch size 1
+# - 1.5-2x speedup at larger batches
+```
+
+**How ONNX Runtime Works:**
+- Converts PyTorch model to ONNX graph format
+- Applies graph optimizations (operator fusion, constant folding)
+- Uses optimized CUDA kernels
+- Reduces CPU overhead and kernel launch time
+- Cached for reuse in future runs
+
+**Compare all methods:**
+```bash
+python scripts/compare_results.py --quantizations none,bitsandbytes,none_onnx
+```
+
 **Note:** If you don't have a local GPU, skip to Phase 3.
 
 ---
@@ -184,6 +220,43 @@ jupyter notebook experiments/analysis/comparison.ipynb
 
 ---
 
+### PHASE 2B: Advanced Optimization Testing (Optional)
+
+**Available Inference Engines:**
+
+1. **Standard PyTorch (transformers)** - Default, well-tested
+2. **ONNX Runtime (onnx)** - Graph optimizations, 1.5-3x faster
+
+**Available Quantization Methods:**
+
+1. **None (FP16)** - Baseline, best accuracy
+2. **BitsAndBytes (INT8)** - 50% memory reduction, 2-2.5x faster at large batches
+
+**Hybrid Configurations:**
+
+Test different combinations:
+```bash
+# FP16 + Standard PyTorch (baseline)
+python scripts/benchmark_local.py \
+  --quantization none --inference-engine transformers \
+  --batch-sizes 1,8,16,32 --num-samples 1000 --no-optimizations
+
+# FP16 + ONNX Runtime (optimized graph)
+python scripts/benchmark_local.py \
+  --quantization none --inference-engine onnx \
+  --batch-sizes 1,8,16,32 --num-samples 1000 --no-optimizations
+
+# INT8 + Standard PyTorch (quantized)
+python scripts/benchmark_local.py \
+  --quantization bitsandbytes --inference-engine transformers \
+  --batch-sizes 1,8,16,32 --num-samples 1000 --no-optimizations
+
+# Compare all configurations
+python scripts/compare_results.py
+```
+
+---
+
 ## Quick Start Options
 
 ### Option 1: Fastest Path (Deploy Only)
@@ -250,8 +323,10 @@ Total: ~10-12 hours, Cost: ~$18-25
 
 | Script | Purpose | When to Use |
 |--------|---------|-------------|
-| `download_model.py` | Download model | Step 3 (once) |
-| `benchmark_local.py` | Local testing | Step 5 (optional) |
+| `download_model.py` | Download model | Step 4 (once) |
+| `download_model_safe.py` | Memory-efficient download | Step 4 (recommended) |
+| `benchmark_local.py` | Local performance testing | Step 5, 7 (optional) |
+| `compare_results.py` | Compare benchmark results | After benchmarks |
 | `test_local_handler.py` | Test handler | Step 6 (optional) |
 | `test_endpoint.py` | Test RunPod endpoint | Steps 10, 11-14 |
 | `analyze_results.py` | Analyze results | Step 16 |
@@ -272,24 +347,26 @@ Use these to see the exact environment variables needed for each configuration.
 
 ## Expected Results
 
-After completing experiments, you will have:
+After completing benchmarks, you will have:
 
 ### Performance Metrics (batch_size=16)
 
-| Quantization | P95 Latency | Throughput | GPU Memory | Accuracy |
-|--------------|-------------|------------|------------|----------|
-| FP16 | ~100-120ms | ~80-95 samples/s | ~3.5GB | 92.0% |
-| BitsAndBytes | ~90-110ms | ~85-105 samples/s | ~2.0GB | >91.5% |
-| AWQ | ~80-100ms | ~95-120 samples/s | ~1.5GB | >91.0% |
-| GPTQ | ~85-105ms | ~90-115 samples/s | ~1.5GB | >91.0% |
+| Configuration | Inference Engine | P95 Latency | Throughput | Speedup vs FP16 |
+|--------------|------------------|-------------|------------|-----------------|
+| FP16 Baseline | Transformers | ~379ms | ~42 samples/s | 1.0x (baseline) |
+| BitsAndBytes INT8 | Transformers | ~185ms | ~89 samples/s | 2.1x faster |
+| FP16 + ONNX | ONNX Runtime | ~150-200ms | ~70-100 samples/s | 1.7-2.4x faster |
+| INT8 + ONNX | ONNX Runtime | ~100-140ms | ~110-150 samples/s | 2.6-3.6x faster |
+
+Note: Actual results depend on GPU, sequence lengths, and PyTorch version.
 
 ### Analysis Outputs
 
-- `results/summary.csv` - Complete results table
-- `results/analysis/comparison_table.csv` - Summary comparison
-- `results/analysis/latency_comparison.png` - Visualizations
-- `results/analysis/recommendations.json` - Best configurations
-- `results/experiment_report.pdf` - Professional report
+- `results/local_benchmarks/none/` - FP16 baseline results
+- `results/local_benchmarks/bitsandbytes/` - INT8 quantization results
+- `results/local_benchmarks/none_onnx/` - ONNX Runtime FP16 results
+- `results/comparison.csv` - Side-by-side comparison
+- `results/analysis/` - Detailed analysis and visualizations
 
 ---
 
@@ -315,11 +392,29 @@ Cause: Some quantization methods are incompatible with torch.compile
 
 Solution: SET USE_COMPILE=false when using quantization
 
+### "PyTorch 2.9 memory allocation errors"
+
+Cause: PyTorch 2.9.x has known bugs with memory allocation
+
+Solution: Downgrade to PyTorch 2.4.0 (see Phase 2, Step 5)
+
+### "ONNX Runtime not found"
+
+Cause: optimum[onnxruntime-gpu] not installed
+
+Solution: pip install optimum[onnxruntime-gpu] onnx onnxruntime-gpu
+
+### "ONNX conversion slow or fails"
+
+Cause: First-time conversion takes 30-60s
+
+Solution: Be patient. ONNX model is cached for future runs
+
 ### "AWQ/GPTQ not working"
 
 Cause: Requires pre-quantized model or specific setup
 
-Solution: Focus on FP16 with optimizations and BitsAndBytes quantization
+Solution: Focus on FP16, ONNX Runtime, and BitsAndBytes quantization
 
 **For detailed troubleshooting, see README.md "Troubleshooting" section**
 
